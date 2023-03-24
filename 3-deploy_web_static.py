@@ -1,62 +1,73 @@
 #!/usr/bin/python3
-"""
-Fabric script that generates archive
-"""
+"""Tar, transfer, and deploy static html to webservers"""
 
-from fabric.api import *
+from fabric import api, decorators
+from fabric.contrib import files
 from datetime import datetime
 import os
 
-env.hosts = ["35.196.96.41", "3.234.218.189"]
-env.user = "ubuntu"
-
-
-def do_pack():
-    """
-        return the archive path if correctly gernerated.
-    """
-
-    local("mkdir -p versions")
-    date = datetime.now().strftime("%Y%m%d%H%M%S")
-    archived_f_path = "versions/web_static_{}.tgz".format(date)
-    t_gzip_archive = local("tar -cvzf {} web_static".format(archived_f_path))
-
-    if t_gzip_archive.succeeded:
-        return archived_f_path
-    else:
-        return None
-
-
-def do_deploy(archive_path):
-    """
-        Distribute an archive to our web servers
-    """
-    if os.path.exists(archive_path):
-        archived_file = archive_path[9:]
-        newest_version = "/data/web_static/releases/" + archived_file[:-4]
-        archived_file = "/tmp/" + archived_file
-        put(archive_path, "/tmp/")
-        run("sudo mkdir -p {}".format(newest_version))
-        run("sudo tar -xzf {} -C {}/".format(archived_file,
-                                             newest_version))
-        run("sudo rm {}".format(archived_file))
-        run("sudo mv {}/web_static/* {}".format(newest_version,
-                                                newest_version))
-        run("sudo rm -rf {}/web_static".format(newest_version))
-        run("sudo rm -rf /data/web_static/current")
-        run("sudo ln -s {} /data/web_static/current".format(newest_version))
-
-        print("New version deployed!")
-        return True
-
-    return False
+api.env.hosts = ['holberton1', 'holberton3']
+api.env.hosts = ['142.44.167.235', '144.217.246.199']
+api.env.user = 'ubuntu'
+api.env.key_filename = '~/.ssh/holberton'
 
 
 def deploy():
+    """Wrapper function to pack html files into tarball and transfer
+    to web servers."""
+    return do_deploy(do_pack())
+
+
+@decorators.runs_once
+def do_pack():
+    """Function to create tarball of webstatic files from the web_static
+    folder in Airbnb_v2.
+
+    Returns: path of .tgz file on success, False otherwise
     """
-    Deploy function do_pack and do_deploy.
+    with api.settings(warn_only=True):
+        isdir = os.path.isdir('versions')
+        if not isdir:
+            mkdir = api.local('mkdir versions')
+            if mkdir.failed:
+                return False
+        suffix = datetime.now().strftime('%Y%m%d%M%S')
+        path = 'versions/web_static_{}.tgz'.format(suffix)
+        tar = api.local('tar -cvzf {} web_static'.format(path))
+        if tar.failed:
+            return False
+        size = os.stat(path).st_size
+        print('web_static packed: {} -> {}Bytes'.format(path, size))
+        return path
+
+
+def do_deploy(archive_path):
+    """Function to transfer `archive_path` to web servers.
+
+    Args:
+        archive_path (str): path of the .tgz file to transfer
+
+    Returns: True on success, False otherwise.
     """
-    path = do_pack()
-    if path:
-        do_deploy(path)
-    return False
+    if not os.path.isfile(archive_path):
+        return False
+    with api.cd('/tmp'):
+        basename = os.path.basename(archive_path)
+        root, ext = os.path.splitext(basename)
+        outpath = '/data/web_static/releases/{}'.format(root)
+        try:
+            putpath = api.put(archive_path)
+            if files.exists(outpath):
+                api.run('rm -rdf {}'.format(outpath))
+            api.run('mkdir -p {}'.format(outpath))
+            api.run('tar -xzf {} -C {}'.format(putpath[0], outpath))
+            api.run('rm -f {}'.format(putpath[0]))
+            api.run('mv -u {}/web_static/* {}'.format(outpath, outpath))
+            api.run('rm -rf {}/web_static'.format(outpath))
+            api.run('rm -rf /data/web_static/current')
+            api.run('ln -s {} /data/web_static/current'.format(outpath))
+            print('New version deployed!')
+        except:
+            return False
+        else:
+            return True

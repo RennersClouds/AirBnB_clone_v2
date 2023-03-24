@@ -1,21 +1,28 @@
 #!/usr/bin/python3
-""" Script Fabric that generates a .tgz from the contents of web_static """
-from fabric.api import local
+"""Generate .tgz file from the contents of the web_static folder"""
+
+from fabric import api
 from datetime import datetime
+import os
 
 
 def do_pack():
-    """
-        Return the archive path if archive has been correctly
-        gernerated.
-    """
+    """Function to create tarball of webstatic files from the web_static
+    folder in Airbnb_v2.
 
-    local("mkdir -p versions")
-    date = datetime.now().strftime("%Y%m%d%H%M%S")
-    archived_f_path = "versions/web_static_{}.tgz".format(date)
-    t_gzip_archive = local("tar -cvzf {} web_static".format(archived_f_path))
-
-    if t_gzip_archive.succeeded:
-        return archived_f_path
-    else:
-        return None
+    Returns: path of .tgz file on success, None otherwise
+    """
+    with api.settings(warn_only=True):
+        isdir = os.path.isdir('versions')
+        if not isdir:
+            mkdir = api.local('mkdir versions')
+            if mkdir.failed:
+                return None
+        suffix = datetime.now().strftime('%Y%m%d%M%S')
+        path = 'versions/web_static_{}.tgz'.format(suffix)
+        tar = api.local('tar -cvzf {} web_static'.format(path))
+        if tar.failed:
+            return None
+        size = os.stat(path).st_size
+        print('web_static packed: {} -> {}Bytes'.format(path, size))
+        return path
